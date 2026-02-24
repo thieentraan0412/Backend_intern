@@ -33,6 +33,10 @@ app.use('/api/feed', feedRoutes);
 app.use('/api/likes', likesRoutes);
 app.use('/api/matches', matchesRoutes);
 app.use('/api/availability', availabilityRoutes);
+app.use('/', (req, res) => {
+  res.send('Hello World!');
+});
+
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
