@@ -17,11 +17,21 @@ connectDB();
 const app = express();
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-const allowedOrigins = process.env.CLIENT_URL.split(',');
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  process.env.CLIENT_URL
+];
 
 app.use(cors({
-  origin: allowedOrigins,
-  credentials: true,
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true
 }));
 
 app.use(express.json());
@@ -33,9 +43,6 @@ app.use('/api/feed', feedRoutes);
 app.use('/api/likes', likesRoutes);
 app.use('/api/matches', matchesRoutes);
 app.use('/api/availability', availabilityRoutes);
-app.use('/', (req, res) => {
-  res.send('Hello World!');
-});
 
 
 // ── Health check ──────────────────────────────────────────────────────────────

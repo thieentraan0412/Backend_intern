@@ -1,285 +1,316 @@
-# 🚀 DateMe – Backend API
+# DateMe — Backend API
 
-REST API cho ứng dụng hẹn hò **DateMe**, xây dựng bằng **Node.js + Express + MongoDB Atlas**.
-
----
-
-## 📦 Tech Stack
-
-| Công nghệ | Phiên bản | Vai trò |
-|-----------|-----------|---------|
-| Node.js | ≥ 18 | Runtime |
-| Express | ^4.18 | Web framework |
-| MongoDB Atlas | - | Database (cloud) |
-| Mongoose | ^8.2 | ODM |
-| bcryptjs | ^2.4 | Hash password |
-| jsonwebtoken | ^9.0 | JWT auth |
-| dotenv | ^16.4 | Biến môi trường |
-| nodemon | ^3.1 | Dev server auto-reload |
+> REST API cho ứng dụng hẹn hò mini — Node.js + Express + MongoDB Atlas
 
 ---
 
-## 📁 Cấu Trúc Thư Mục
+## 1. Tổ Chức Hệ Thống
+
+### Kiến trúc tổng thể
+
+```
+Client (React)  ──HTTP/JSON──►  Express API  ──Mongoose──►  MongoDB Atlas
+                                      │
+                               JWT Middleware
+                               (xác thực token)
+```
+
+Ứng dụng chia thành 3 tầng rõ ràng:
+
+| Tầng | Vai trò |
+|---|---|
+| **Routing** (`routes/`) | Nhận request, validate input, trả response |
+| **Middleware** (`middleware/`) | Xác thực JWT trước khi vào route bảo vệ |
+| **Model** (`models/`) | Schema dữ liệu, tương tác với MongoDB |
+
+### Cấu trúc thư mục
 
 ```
 backend/
-├── config/
-│   └── db.js               # Kết nối MongoDB Atlas
-├── middleware/
-│   └── auth.js             # Middleware xác thực JWT (verifyToken)
+├── config/db.js          ← Kết nối MongoDB Atlas qua Mongoose
+├── middleware/auth.js     ← Xác thực JWT, gắn req.user
 ├── models/
-│   ├── User.js             # Schema user (name, email, passwordHash, age, gender, bio)
-│   ├── Like.js             # Schema like (fromUser → toUser)
-│   ├── Match.js            # Schema match (users: [A, B])
-│   └── Availability.js     # Schema lịch hẹn (matchId, userId, slots[])
+│   ├── User.js            ← Người dùng (tên, email, mật khẩu hash, hồ sơ)
+│   ├── Like.js            ← Lượt thích giữa 2 người dùng
+│   ├── Match.js           ← Cặp đôi đã match
+│   └── Availability.js   ← Lịch trống của từng người trong một match
 ├── routes/
-│   ├── auth.js             # POST /register, POST /login
-│   ├── profile.js          # GET & PATCH /profile
-│   ├── feed.js             # GET /feed (danh sách gợi ý)
-│   ├── likes.js            # POST /likes/:userId, GET /likes/sent
-│   ├── matches.js          # GET /matches
-│   └── availability.js     # POST & GET /availability/:matchId
-├── .env                    # Biến môi trường (KHÔNG commit)
-├── .env.example            # Mẫu .env
-├── server.js               # Entry point
-└── package.json
+│   ├── auth.js            ← Đăng ký / Đăng nhập
+│   ├── profile.js         ← Xem / cập nhật hồ sơ
+│   ├── feed.js            ← Danh sách người dùng khác
+│   ├── likes.js           ← Thích và phát hiện match
+│   ├── matches.js         ← Danh sách match
+│   └── availability.js   ← Lịch hẹn & tìm slot trùng
+└── server.js              ← Entry point, mount routes, cấu hình CORS
 ```
 
 ---
 
-## ⚙️ Cài Đặt & Chạy
+## 2. Lưu Trữ Dữ Liệu
 
-### 1. Cài dependencies
+**Tất cả dữ liệu được lưu trên MongoDB Atlas** (cloud database) thông qua thư viện Mongoose.
 
-```bash
-npm install
+Không dùng localStorage — localStorage chỉ được dùng ở **client** để lưu JWT token tạm thời.
+
+### Các collection trong database
+
+| Collection | Mô tả |
+|---|---|
+| `users` | Thông tin tài khoản và hồ sơ người dùng |
+| `likes` | Ai đã thích ai (unique index ngăn like trùng) |
+| `matches` | Cặp đôi đã match thành công |
+| `availabilities` | Lịch trống của từng người trong từng match |
+
+### Schema chi tiết
+
+**User**
+```
+name, email, passwordHash (bcrypt), age, gender, bio, profileComplete
 ```
 
-### 2. Tạo file `.env`
-
-Sao chép từ `.env.example`:
-
-```bash
-cp .env.example .env
+**Like**
+```
+fromUser (ref User), toUser (ref User)
+Index unique: (fromUser, toUser)
 ```
 
-Điền vào các giá trị:
-
-```env
-PORT=5000
-MONGO_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net/?appName=<App>
-JWT_SECRET=your_super_secret_key_here
-JWT_EXPIRES_IN=7d
+**Match**
+```
+users: [ObjectId, ObjectId]  ← đúng 2 người dùng
 ```
 
-### 3. Chạy development server
-
-```bash
-npm run dev        # nodemon – auto-reload khi sửa file
+**Availability**
 ```
-
-### 4. Chạy production
-
-```bash
-npm start          # node server.js
-```
-
-Server mặc định chạy tại: **http://localhost:5000**
-
----
-
-## 🌐 API Endpoints
-
-### 🔐 Auth — `/api/auth`
-
-| Method | Endpoint | Mô tả | Auth |
-|--------|----------|-------|------|
-| POST | `/api/auth/register` | Đăng ký tài khoản mới | ❌ |
-| POST | `/api/auth/login` | Đăng nhập, nhận JWT | ❌ |
-
-**Body đăng ký:**
-```json
-{ "name": "Thien", "email": "user@gmail.com", "password": "123456" }
-```
-
-**Body đăng nhập:**
-```json
-{ "email": "user@gmail.com", "password": "123456" }
-```
-
-**Response thành công:**
-```json
-{ "token": "<JWT>", "user": { "_id": "...", "name": "Thien", "email": "..." } }
+matchId, userId,
+slots: [{ date: "YYYY-MM-DD", startTime: "HH:MM", endTime: "HH:MM" }]
+Index unique: (matchId, userId) ← mỗi người chỉ có 1 bản ghi per match
 ```
 
 ---
 
-### 👤 Profile — `/api/profile`
+## 3. Logic Match Hoạt Động Thế Nào
 
-> Tất cả đều yêu cầu `Authorization: Bearer <token>`
+Khi người dùng A nhấn "Like" người dùng B, hệ thống thực hiện theo thứ tự:
+
+```
+1. Kiểm tra A không tự like chính mình
+
+2. Lưu Like { fromUser: A, toUser: B }
+   (dùng upsert → không tạo bản ghi trùng)
+
+3. Truy vấn: Có tồn tại Like { fromUser: B, toUser: A } không?
+   │
+   ├── KHÔNG có → trả về { matched: false }
+   │              (chờ B like lại)
+   │
+   └── CÓ → Match đã xảy ra!
+            │
+            ├── Kiểm tra Match { users: [A, B] } đã tồn tại chưa?
+            │   ├── ĐÃ có → trả về matchId hiện tại
+            │   └── CHƯA → tạo Match mới → trả về matchId mới
+            │
+            └── Trả về { matched: true, matchId }
+```
+
+**Đặc điểm:**
+- Phát hiện mutual like ngay tức thì, không cần polling
+- Tự động tạo Match record một lần duy nhất
+- Idempotent: like nhiều lần không tạo dữ liệu thừa
+
+---
+
+## 4. Logic Tìm Slot Trùng (First Common Slot)
+
+Khi cả hai người trong match đều đã submit lịch trống, hệ thống tìm khung giờ chung sớm nhất.
+
+### Thuật toán
+
+```
+Input:  slotsA = [...], slotsB = [...]
+
+Bước 1: Sắp xếp cả hai danh sách theo (date ASC, startTime ASC)
+        → Đảm bảo tìm được slot sớm nhất, không phụ thuộc thứ tự nhập
+
+Bước 2: Duyệt từng cặp (slotA, slotB) cùng ngày:
+        overlapStart = max(startA_phút, startB_phút)
+        overlapEnd   = min(endA_phút,   endB_phút)
+
+        Nếu overlapStart < overlapEnd:
+          → Tìm thấy! Return { date, startTime, endTime }
+
+Bước 3: Nếu không có cặp nào thỏa → Return null
+```
+
+### Ví dụ minh họa
+
+```
+A rảnh: 25/02  09:00 → 12:00
+B rảnh: 25/02  10:30 → 14:00
+
+overlapStart = max(540, 630) = 630  → 10:30
+overlapEnd   = min(720, 840) = 720  → 12:00
+
+Kết quả: "Hai bạn có date hẹn vào: 25/02/2026 10:30"
+```
+
+### Lý do dùng số phút thay vì Date object
+
+- Tránh hoàn toàn lỗi timezone
+- So sánh số nguyên đơn giản, nhanh, chính xác
+- Không phụ thuộc locale của máy chủ
+
+---
+
+## 5. Tính Năng Đề Xuất: Gợi Ý Profile Thông Minh
+
+### Ý tưởng
+
+Thay vì hiển thị feed ngẫu nhiên, hệ thống tính **điểm tương thích** cho từng cặp người dùng và sắp xếp theo thứ tự giảm dần.
+
+### Công thức tính điểm (0–100)
+
+| Tiêu chí | Trọng số | Cách tính |
+|---|---|---|
+| **Giới tính** | 40% | Nam ↔ Nữ → 40đ; các trường hợp khác → 0đ |
+| **Tuổi** | 30% | Chênh lệch 0–3 tuổi → 30đ; giảm dần theo khoảng cách |
+| **Bio** | 30% | Đếm số từ khóa chung (sau khi lọc stop words) |
+
+### Điểm tuổi chi tiết
+
+```
+Δage = |tuổi_A - tuổi_B|
+Điểm = max(0, 30 - Δage * 3)
+→ Chênh 0-2 tuổi: 30-24đ (gần lý tưởng)
+→ Chênh 10 tuổi: 0đ
+```
+
+### Điểm bio
+
+```
+Tách bio thành từ khóa (bỏ stop words tiếng Việt: "và", "là", "của", ...)
+Điểm = (số từ chung / max(lenA, lenB)) * 30
+
+Ví dụ:
+  A bio: "thích du lịch cà phê âm nhạc"
+  B bio: "yêu du lịch và nghe nhạc cuối tuần"
+  Từ chung: "du lịch", "âm nhạc/nhạc" → 2 từ
+  Điểm ≈ (2/4) * 30 = 15đ
+```
+
+### Triển khai
+
+- **Backend:** Thêm route `GET /api/feed/recommended` — tính điểm server-side, trả về danh sách đã sắp xếp kèm `compatibilityScore`
+- **Frontend:** Tab "✨ Gợi ý" / "👥 Tất cả" trên FeedPage; badge `"92% phù hợp"` trên card; highlight từ khóa chung dưới dạng tag màu tím
+
+---
+
+## 6. Mô Tả API
+
+Tất cả route bảo vệ yêu cầu header:
+```
+Authorization: Bearer <jwt_token>
+```
+
+### Auth
 
 | Method | Endpoint | Mô tả |
-|--------|----------|-------|
-| GET | `/api/profile` | Lấy thông tin profile của mình |
-| PATCH | `/api/profile` | Cập nhật age, gender, bio |
+|---|---|---|
+| POST | `/api/auth/register` | Tạo tài khoản mới, trả về JWT |
+| POST | `/api/auth/login` | Đăng nhập, trả về JWT |
 
-**Body PATCH:**
+**Register body:** `{ name, email, password }`
+**Login body:** `{ email, password }`
+
+---
+
+### Profile 🔒
+
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| GET | `/api/profile/me` | Lấy thông tin hồ sơ hiện tại |
+| PUT | `/api/profile/me` | Cập nhật tên, tuổi, giới tính, bio |
+
+**PUT body:** `{ name?, age?, gender?, bio? }` — tất cả không bắt buộc
+
+---
+
+### Feed 🔒
+
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| GET | `/api/feed` | Danh sách tất cả người dùng trừ bản thân |
+
+**Response:** `{ users: [...] }` — không bao gồm `passwordHash`
+
+---
+
+### Likes 🔒
+
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| POST | `/api/likes/:userId` | Thích người dùng, tự động tạo Match nếu mutual |
+| GET | `/api/likes/sent` | Danh sách những người mình đã thích |
+
+**POST response:**
 ```json
-{ "age": 23, "gender": "male", "bio": "Thích cà phê và du lịch" }
+{ "matched": true, "matchId": "..." }   // nếu trùng
+{ "matched": false }                    // nếu chưa trùng
 ```
 
 ---
 
-### 🔍 Feed — `/api/feed`
+### Matches 🔒
 
-| Method | Endpoint | Mô tả | Auth |
-|--------|----------|-------|------|
-| GET | `/api/feed` | Danh sách user gợi ý (chưa like, đã hoàn thiện profile) | ✅ |
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| GET | `/api/matches` | Tất cả cặp đôi của người dùng hiện tại |
 
----
-
-### ❤️ Likes — `/api/likes`
-
-| Method | Endpoint | Mô tả | Auth |
-|--------|----------|-------|------|
-| POST | `/api/likes/:userId` | Like một user. Nếu mutual → tạo Match | ✅ |
-| GET | `/api/likes/sent` | Lấy danh sách user mình đã like | ✅ |
-
-**Response khi match:**
-```json
-{ "matched": true, "matchId": "64f3...", "message": "It's a Match! 🎉" }
-```
+**Response:** `{ matches: [{ _id, users: [A, B], createdAt }] }`
 
 ---
 
-### 💞 Matches — `/api/matches`
+### Availability 🔒
 
-| Method | Endpoint | Mô tả | Auth |
-|--------|----------|-------|------|
-| GET | `/api/matches` | Danh sách tất cả matches của user hiện tại | ✅ |
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| POST | `/api/availability/:matchId` | Lưu (hoặc cập nhật) lịch trống |
+| GET | `/api/availability/:matchId` | Lấy lịch trống của bản thân trong match |
+| GET | `/api/availability/:matchId/common-slot` | Tìm khung giờ trùng nhau |
 
----
-
-### 📅 Availability — `/api/availability`
-
-| Method | Endpoint | Mô tả | Auth |
-|--------|----------|-------|------|
-| POST | `/api/availability/:matchId` | Lưu/cập nhật các time slot | ✅ |
-| GET | `/api/availability/:matchId` | Lấy time slot của mình trong match | ✅ |
-| GET | `/api/availability/:matchId/common-slot` | Tìm slot trùng sớm nhất giữa 2 người | ✅ |
-
-**Body POST:**
+**POST body:**
 ```json
 {
   "slots": [
-    { "date": "2026-03-01", "startTime": "14:00", "endTime": "17:00" },
-    { "date": "2026-03-03", "startTime": "09:00", "endTime": "11:00" }
+    { "date": "2026-03-05", "startTime": "09:00", "endTime": "12:00" }
   ]
 }
 ```
 
-**Response common-slot khi tìm thấy:**
+**GET common-slot response:**
 ```json
-{
-  "ready": true,
-  "found": true,
-  "message": "Hai bạn có date hẹn vào: Thứ Bảy, 1 tháng 3 năm 2026 14:00",
-  "slot": { "date": "2026-03-01", "startTime": "14:00", "endTime": "16:00" }
-}
+// Cả hai đã submit + có slot trùng
+{ "ready": true, "found": true, "message": "Hai bạn có date hẹn vào: ..." }
+
+// Cả hai đã submit + không có slot trùng
+{ "ready": true, "found": false, "message": "Chưa tìm được thời gian trùng..." }
+
+// Đối phương chưa submit
+{ "ready": false }
 ```
 
 ---
 
-### 🏥 Health Check
+### Mã Lỗi
 
-```
-GET /api/health
-```
-```json
-{ "status": "ok", "timestamp": "2026-02-24T07:00:00.000Z" }
-```
-
----
-
-## 🗃️ Database Models
-
-### User
-```
-name          String   required
-email         String   required, unique, lowercase
-passwordHash  String   required (bcrypt hash, tự động khi save)
-age           Number   18–99
-gender        String   enum: male | female | non-binary | other
-bio           String   max 500 ký tự
-profileComplete Boolean default: false
-```
-
-### Like
-```
-fromUser  ObjectId → User   required
-toUser    ObjectId → User   required
-Index unique: { fromUser, toUser }
-```
-
-### Match
-```
-users  [ObjectId → User]   (2 phần tử)
-Index: { users }
-```
-
-### Availability
-```
-matchId  ObjectId → Match   required
-userId   ObjectId → User    required
-slots    [{ date, startTime, endTime }]
-Index unique: { matchId, userId }
-```
+| Status | Ý nghĩa |
+|---|---|
+| 400 | Thiếu/sai dữ liệu đầu vào |
+| 401 | Chưa đăng nhập hoặc token hết hạn |
+| 403 | Không có quyền truy cập tài nguyên này |
+| 404 | Không tìm thấy |
+| 409 | Xung đột (ví dụ: email đã tồn tại) |
+| 500 | Lỗi server |
 
 ---
 
-## 🔒 Authentication Flow
-
-```
-1. Client gửi POST /api/auth/login  →  Server trả JWT (7 ngày)
-2. Client lưu token vào localStorage
-3. Mọi request sau: Header "Authorization: Bearer <token>"
-4. Middleware verifyToken:
-     - Giải mã JWT
-     - Tìm user trong DB
-     - Gắn vào req.user
-     - Nếu lỗi → 401 Unauthorized
-```
-
----
-
-## 🔁 Match Flow
-
-```
-User A like B  →  Like { fromUser: A, toUser: B } được lưu
-User B like A  →  Kiểm tra mutual like
-                  → Match { users: [A, B] } được tạo
-Cả 2 vào Schedule → Mỗi người submit Availability
-                  → Server tìm slot trùng sớm nhất
-                  → Trả về thời gian hẹn
-```
-
----
-
-## 🛠️ Development Notes
-
-- `passwordHash` được hash tự động bởi Mongoose **pre-save hook** (bcrypt, 12 rounds).
-- `toJSON()` của User tự động xóa `passwordHash` trước khi gửi về client.
-- Feed loại trừ: chính mình, người đã like, người đã match, user chưa `profileComplete`.
-- Availability dùng thuật toán **O(n²) overlap** – đủ dùng với số slot nhỏ (≤ 7 slot mỗi người).
-
----
-
-## 📌 Biến Môi Trường
-
-| Biến | Bắt buộc | Mô tả |
-|------|---------|-------|
-| `PORT` | ❌ | Port server (default: 5000) |
-| `MONGO_URI` | ✅ | MongoDB Atlas connection string |
-| `JWT_SECRET` | ✅ | Secret key để ký JWT (nên dài ≥ 32 ký tự) |
-| `JWT_EXPIRES_IN` | ❌ | Thời hạn token (default: `7d`) |
-| `CLIENT_URL` | ❌ | Origin frontend cho CORS (default: `http://localhost:5173`) |
+*Được xây dựng cho bài kiểm tra tuyển dụng Web Developer Intern tại Clique83.com*
